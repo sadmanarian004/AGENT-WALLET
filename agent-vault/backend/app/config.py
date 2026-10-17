@@ -3,8 +3,11 @@ import os
 from decimal import Decimal
 from dotenv import load_dotenv
 
-load_dotenv()
+from pathlib import Path
 
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL", "").strip()
+TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN", "").strip()
 APP_NAME = "Agent Vault API"
 CHAIN_ID = 11155111  # Sepolia; deliberately hard-coded for this demo.
 CHAIN_NAME = "Sepolia"

@@ -3,3 +3,4 @@ uvicorn[standard]>=0.30,<1
 httpx>=0.27,<1
 python-dotenv>=1,<2
 eth-account>=0.13,<1
+turso_serverless
