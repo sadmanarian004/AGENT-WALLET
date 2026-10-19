@@ -4,7 +4,7 @@ import {
   Activity, ArrowUpRight, BadgeCheck, Ban, Blocks, Check,
   CircleAlert, CircleCheck, CircleDollarSign, Clock3, Copy, ExternalLink, FileClock,
   Fingerprint, Gauge, KeyRound, LoaderCircle, LockKeyhole, LogOut, Menu, RefreshCw,
-  Search, Shield, ShieldAlert, ShieldCheck, Sparkles, Wallet, X,
+  Search, Shield, ShieldAlert, ShieldCheck, Sparkles, Wallet, X, User, Sliders,
 } from 'lucide-react'
 
 type CheckItem = { name: string; status: 'pass' | 'block' | 'warn'; detail: string }
@@ -229,9 +229,7 @@ export default function App() {
             finished = true; break
           }
         } catch (e) {
-          // A confirmed mismatch/policy error is not a transient receipt delay.
           if (e instanceof Error && /does not match|not on Sepolia|returned a transaction with a missing|exceeds the approved|different transaction hash|intent is invalid|intent expired|already consumed|incomplete or invalid/i.test(e.message)) throw e
-          // Once MetaMask broadcasts, transient backend/RPC errors should not imply the tx failed.
           if (i === 11) setNotice(`Transaction was broadcast as ${hash}, but receipt verification is still pending. Check the Audit Log and explorer.`)
         }
         if (i < 11) await new Promise(resolve => setTimeout(resolve, 2500))
@@ -250,108 +248,333 @@ export default function App() {
     { id: 'controls', label: 'Risk controls', icon: ShieldCheck }, { id: 'audit', label: 'Audit log', icon: FileClock },
   ]
 
-  return <div className="app-shell">
-    <aside className={`sidebar ${mobileMenu ? 'open' : ''}`}>
-      <div className="brand"><div className="brand-mark"><ShieldCheck size={23}/></div><div><strong>agent<span>vault</span></strong><small>SECURE EXECUTION LAYER</small></div><button className="icon-button mobile-close" onClick={() => setMobileMenu(false)} aria-label="Close navigation"><X size={18}/></button></div>
-      <div className="side-label">WORKSPACE</div>
-      <nav>{navItems.map(item => { const Icon = item.icon; return <button key={item.id} className={`nav-item ${page === item.id ? 'active' : ''}`} onClick={() => { setPage(item.id); setMobileMenu(false); setError(''); }}><Icon size={18}/><span>{item.label}</span>{item.id === 'audit' && audits.some(a => a.status === 'block') && <i className="nav-dot"/>}</button> })}</nav>
-      <div className="sidebar-bottom"><div className="network-card"><div className="network-top"><span className="pulse-dot"/> SEPOLIA TESTNET</div><div className="network-title">Mainnet disabled</div><p>All transactions are scoped to a test network. Signing always happens in your wallet.</p><div className="network-status"><LockKeyhole size={14}/> Policy gated</div></div><div className="side-foot"><span className="pulse-dot green"/> API {health ? 'reachable' : 'checking'}<span className="version">v1.0</span></div></div>
-    </aside>
-    {mobileMenu && <button className="mobile-scrim" aria-label="Close navigation" onClick={() => setMobileMenu(false)}/>}
-    <main className="main-area">
-      <header className="topbar"><div className="top-left"><button className="icon-button mobile-menu" onClick={() => setMobileMenu(true)} aria-label="Open navigation"><Menu size={20}/></button><div className="crumb">Workspace <span>/</span> <strong>{navItems.find(x => x.id === page)?.label}</strong></div></div><div className="top-actions"><div className="secure-chip"><span className="pulse-dot green"/> <span>Policy engine active</span></div>{connected ? <div className="wallet-menu"><div className="avatar"><Wallet size={16}/></div><div className="wallet-ident"><strong>{shortAddress(address)}</strong><small>Sepolia account</small></div><button className="icon-button" onClick={disconnect} title="Disconnect session" aria-label="Disconnect session"><LogOut size={16}/></button></div> : <button className="button button-primary button-sm" disabled={busy} onClick={connectWallet}><Wallet size={16}/>{busy ? 'Connecting…' : 'Connect wallet'}</button>}</div></header>
-      <div className="content">
-        {error && <div className="alert alert-error"><CircleAlert size={18}/><span>{error}</span><button onClick={() => setError('')} aria-label="Dismiss error"><X size={16}/></button></div>}
-        {notice && <div className="alert alert-info"><CircleCheck size={18}/><span>{notice}</span><button onClick={() => setNotice('')} aria-label="Dismiss message"><X size={16}/></button></div>}
-        {page === 'overview' && <>
-          <div className="page-heading"><div><div className="eyebrow"><span className="eyebrow-line"/> WALLET INTELLIGENCE</div><h1>Wallet overview</h1><p>Human-approved execution, independently checked before anything is broadcast.</p></div><button className="button button-quiet" onClick={() => { refreshPolicy().catch(() => {}); refreshBalance().catch(e => setError(errorMessage(e))); refreshAudit('').catch(() => {}); }} disabled={!connected}><RefreshCw size={15}/> Refresh data</button></div>
-          <div className="metric-grid">
-            <div className="metric-card balance-card"><div className="metric-label">SEPOLIA WALLET BALANCE <span className="metric-symbol"><CircleDollarSign size={17}/></span></div><div className="metric-value">{connected ? balance : '—'} <span>ETH</span></div><div className="metric-foot"><span className="metric-live"><span className="pulse-dot green"/> Live from MetaMask RPC</span></div><div className="balance-watermark"><Blocks size={100}/></div></div>
-            <div className="metric-card"><div className="metric-label">TRANSACTION CAP <span className="metric-symbol"><ArrowUpRight size={17}/></span></div><div className="metric-value">{policy?.max_transaction_eth ?? '—'} <span>ETH</span></div><div className="metric-foot"><span className="text-muted">Per transaction · server enforced</span></div><div className="metric-progress"><span style={{ width: '46%' }}/></div></div>
-            <div className="metric-card"><div className="metric-label">DAILY SPENDING LIMIT <span className="metric-symbol"><Activity size={17}/></span></div><div className="metric-value">{policy?.daily_limit_eth ?? '—'} <span>ETH</span></div><div className="metric-foot"><span className="text-muted">Rolling 24 hours · reservations count</span></div><div className="metric-progress indigo"><span style={{ width: '30%' }}/></div></div>
-            <div className="metric-card"><div className="metric-label">SAFETY STATUS <span className="metric-symbol"><Shield size={17}/></span></div><div className="metric-value status-value"><span className="status-orb"><ShieldCheck size={20}/></span>{policy?.mainnet_enabled ? 'Check setup' : 'Protected'}</div><div className="metric-foot"><span className="green-text">Mainnet execution disabled</span></div></div>
+  return (
+    <div style={{ background: '#000', color: '#fff', display: 'flex', minHeight: '100vh', fontFamily: 'system-ui, sans-serif' }}>
+      {/* Sidebar with Emerald Theme */}
+      <aside style={{ width: '96px', background: '#000', borderRight: '1px solid #111', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'space-between', padding: '32px 0', position: 'fixed', height: '100vh', zIndex: 50 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px' }}>
+          <div style={{ width: '48px', height: '48px', background: 'rgba(16, 185, 129, 0.1)', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
+            <ShieldCheck size={24}/>
           </div>
-          <div className="main-grid">
-            <section className="panel execution-panel"><div className="panel-heading"><div><div className="panel-kicker">TRANSACTION PIPELINE</div><h2>Security before execution</h2><p>A proposal is not a transaction until you approve it in MetaMask.</p></div><span className="badge badge-neutral"><LockKeyhole size={13}/> Guarded flow</span></div>
-              <div className="pipeline"><div className="pipeline-step"><div className="pipeline-icon purple"><Sparkles size={18}/></div><div className="pipeline-copy"><strong>AI proposal</strong><span>Turns your instruction into a fixed transfer request.</span></div><div className="step-tag">01</div></div><div className="pipeline-connector"/><div className="pipeline-step"><div className="pipeline-icon blue"><ShieldCheck size={18}/></div><div className="pipeline-copy"><strong>Server risk checks</strong><span>Allowlist, spending cap, RPC simulation and fee bounds.</span></div><div className="step-tag">02</div></div><div className="pipeline-connector"/><div className="pipeline-step"><div className="pipeline-icon amber"><Fingerprint size={18}/></div><div className="pipeline-copy"><strong>Explicit wallet approval</strong><span>MetaMask displays the transaction you are signing.</span></div><div className="step-tag">03</div></div><div className="pipeline-connector"/><div className="pipeline-step"><div className="pipeline-icon green"><BadgeCheck size={18}/></div><div className="pipeline-copy"><strong>Verified receipt</strong><span>Server checks the mined transaction against the proposal.</span></div><div className="step-tag">04</div></div></div>
-              <button className="button button-primary full-button" onClick={() => setPage('agent')}><Sparkles size={16}/> Create a transaction proposal <ArrowUpRight size={16}/></button>
-            </section>
-            <section className="panel health-panel"><div className="panel-heading"><div><div className="panel-kicker">SYSTEM HEALTH</div><h2>Execution readiness</h2></div><span className={`health-indicator ${policy?.rpc_configured ? 'healthy' : 'warning'}`}><span className="pulse-dot"/>{policy?.rpc_configured ? 'RPC configured' : 'RPC not configured'}</span></div>
-              <div className="health-list"><HealthRow icon={<Blocks size={17}/>} title="Network restriction" description="Ethereum Sepolia · Chain ID 11155111" status="pass" label="Enforced"/><HealthRow icon={<Shield size={17}/>} title="Recipient allowlist" description={policy?.allow_any_recipient ? 'Any valid recipient (unsafe demo override)' : `${policy?.allowlist_count ?? 0} recipient(s) configured`} status={policy?.allow_any_recipient ? 'warn' : (policy?.allowlist_count ? 'pass' : 'block')} label={policy?.allow_any_recipient ? 'Override on' : policy?.allowlist_count ? 'Configured' : 'Configure'}/><HealthRow icon={<Gauge size={17}/>} title="Trusted simulation" description="eth_call, gas estimate, balance and fee checks" status={policy?.rpc_configured ? 'pass' : 'block'} label={policy?.rpc_configured ? 'Available' : 'Blocked'}/><HealthRow icon={<Sparkles size={17}/>} title="Claude planner" description="AI writes explanations; rules remain deterministic" status={policy?.llm_configured ? 'pass' : 'warn'} label={policy?.llm_configured ? 'Connected' : 'Fallback'}/></div>
-              {!health?.auth_secret_configured && <div className="setup-hint"><CircleAlert size={16}/><span>Set a random <code>APP_SECRET</code> (32+ characters) in backend <code>.env</code> before wallet authentication is enabled.</span></div>}
-              {!policy?.rpc_configured && <div className="setup-hint"><CircleAlert size={16}/><span>Set <code>SEPOLIA_RPC_URL</code> in backend <code>.env</code> to enable trusted simulation. Execution fails closed until then.</span></div>}
-            </section>
+          <nav style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '16px' }}>
+            {navItems.map(item => { 
+              const Icon = item.icon; 
+              const isActive = page === item.id;
+              return (
+                <button 
+                  key={item.id} 
+                  onClick={() => { setPage(item.id); setMobileMenu(false); setError(''); }}
+                  style={{
+                    width: '48px', height: '48px', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: isActive ? '#059669' : 'transparent', color: isActive ? '#fff' : '#9ca3af', border: 'none', cursor: 'pointer', transition: 'all 0.2s'
+                  }}
+                  title={item.label}
+                >
+                  <Icon size={20}/>
+                </button>
+              ) 
+            })}
+          </nav>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+          <button onClick={disconnect} style={{ width: '48px', height: '48px', borderRadius: '16px', background: 'transparent', border: 'none', color: '#9ca3af', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="Log out">
+            <LogOut size={18}/>
+          </button>
+          <div style={{ width: '40px', height: '40px', borderRadius: '50%', overflow: 'hidden', border: '1px solid rgba(16, 185, 129, 0.4)' }}>
+            <img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb" alt="Profile" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           </div>
-          <section className="panel audit-preview"><div className="panel-heading compact"><div><div className="panel-kicker">LATEST EVENTS</div><h2>Recent audit activity</h2></div><button className="text-button" onClick={() => setPage('audit')}>View all <ArrowUpRight size={14}/></button></div>
-            {!connected ? <EmptyState icon={<Wallet size={20}/>} title="Connect to view your audit trail" text="Audit events are scoped to the authenticated wallet." action="Connect wallet" onAction={connectWallet}/> : audits.length === 0 ? <EmptyState icon={<FileClock size={20}/>} title="No activity yet" text="Your proposals, policy decisions and receipt checks will appear here."/> : <AuditTable items={audits.slice(0, 5)} onCopy={copy}/>}</section>
-        </>}
+        </div>
+      </aside>
 
-        {page === 'agent' && <>
-          <div className="page-heading"><div><div className="eyebrow"><span className="eyebrow-line"/> INTENT WORKSPACE</div><h1>AI transaction agent</h1><p>Describe your goal, set exact transaction fields, and inspect every server-side check.</p></div><span className="badge badge-live"><span className="pulse-dot green"/> Testnet only</span></div>
-          <div className="agent-layout"><section className="panel agent-form-panel"><div className="form-title"><div className="form-icon"><Sparkles size={19}/></div><div><h2>Build a transaction</h2><p>The AI can explain the request, but it cannot change the address or amount.</p></div></div>
-              <form onSubmit={createProposal} className="agent-form"><label htmlFor="goal">Your instruction <span>Required</span></label><textarea id="goal" value={goal} onChange={e => setGoal(e.target.value)} maxLength={500} minLength={3} rows={3} placeholder="e.g. Send test ETH to my test recipient for a small transfer test." required/><div className="field-meta"><span>Describe the purpose in plain language</span><span>{goal.length}/500</span></div>
-                <label htmlFor="recipient">Recipient address <span>Exact transaction field</span></label><div className="input-wrap"><Wallet size={16}/><input id="recipient" value={recipient} onChange={e => setRecipient(e.target.value)} placeholder="0x…" spellCheck={false} autoComplete="off" required minLength={42} maxLength={42}/>{recipient && /^0x[a-fA-F0-9]{40}$/.test(recipient) && <Check size={16} className="valid-icon"/>}</div><p className="field-help">Must be on the server's <code>ALLOWED_RECIPIENTS</code> list.</p>
-                <label htmlFor="amount">Amount <span>Native Sepolia ETH</span></label><div className="input-wrap amount-wrap"><CircleDollarSign size={16}/><input id="amount" type="number" min="0.000000000000000001" step="0.000000000000000001" value={amount} onChange={e => setAmount(e.target.value)} required/><span className="input-suffix">ETH</span></div><div className="amount-limit"><span>Per-tx limit</span><strong>{policy?.max_transaction_eth ?? '—'} ETH</strong></div>
-                <div className="form-notice"><LockKeyhole size={16}/><p>Private keys never enter this app. The backend simulates and validates; MetaMask alone signs and broadcasts.</p></div>
-                <button className="button button-primary full-button" type="submit" disabled={!connected || busy}>{busy ? <LoaderCircle className="spin" size={17}/> : <Sparkles size={17}/>} {busy ? (busyLabel || 'Working…') : 'Generate & check proposal'} <ArrowUpRight size={16}/></button>
-                {!connected && <div className="inline-warning"><CircleAlert size={15}/> Connect and authenticate MetaMask to create a proposal.</div>}
-              </form></section>
-            <section className="panel proposal-panel"><div className="panel-heading"><div><div className="panel-kicker">PROPOSAL INSPECTOR</div><h2>Risk analysis</h2><p>Every decision below comes from backend rules and RPC responses.</p></div>{proposal && <span className={`badge ${isEligible ? 'badge-live' : 'badge-danger'}`}>{isEligible ? 'Passed checks' : 'Blocked'}</span>}</div>
-              {!proposal ? <div className="proposal-empty"><div className="empty-orbit"><ShieldCheck size={28}/></div><h3>Awaiting a proposal</h3><p>Submit your transaction details to run recipient, limit, gas, balance and simulation checks.</p><div className="empty-steps"><span><Check size={13}/> Address validation</span><span><Check size={13}/> Spending policy</span><span><Check size={13}/> RPC simulation</span></div></div> : <div className="proposal-details">
-                <div className={`proposal-status ${proposal.risk.every(c => c.status === 'pass') && proposal.simulation.ok ? 'ok' : 'blocked'}`}><div className="status-icon">{proposal.risk.every(c => c.status === 'pass') && proposal.simulation.ok ? <ShieldCheck size={21}/> : <ShieldAlert size={21}/>}</div><div><strong>{proposal.risk.every(c => c.status === 'pass') && proposal.simulation.ok ? 'Eligible for explicit approval' : 'Transaction blocked'}</strong><span>{proposal.risk.every(c => c.status === 'pass') && proposal.simulation.ok ? 'All current checks passed. This is not an execution or guarantee.' : 'Resolve every blocking check before signing.'}</span></div></div>
-                <div className="proposal-amount"><div><small>Proposed transfer</small><div className="big-amount">{proposal.amount_eth} <span>ETH</span></div></div><div className="chain-pill"><Blocks size={14}/> Sepolia</div></div>
-                <div className="detail-row"><span>Recipient</span><div className="detail-address">{shortAddress(proposal.recipient)} <button onClick={() => copy(proposal.recipient)} aria-label="Copy recipient"><Copy size={13}/></button></div></div>
-                <div className="detail-row"><span>Proposal ID</span><div className="detail-address mono">{proposal.id.slice(0, 12)}… <button onClick={() => copy(proposal.id)} aria-label="Copy proposal ID"><Copy size={13}/></button></div></div>
-                <div className="detail-row"><span>Expires at</span><strong className={proposal.expires_at < Date.now() / 1000 ? 'red-text' : ''}>{fmtDate(proposal.expires_at)}</strong></div>
-                <div className="ai-explanation"><div className="ai-label"><Sparkles size={14}/> AGENT EXPLANATION <span>{proposal.llm_used ? 'CLAUDE' : 'LOCAL FALLBACK'}</span></div><p>{proposal.explanation}</p>{proposal.agent_plan?.steps?.length ? <ol className="agent-plan-steps">{proposal.agent_plan.steps.map((step, i) => <li key={`${i}-${step.title}`}><span>{String(i + 1).padStart(2, '0')}</span><div><strong>{step.title}</strong><p>{step.detail}</p></div></li>)}</ol> : null}</div>
-                <div className="checks-title"><span>SERVER-SIDE CHECKS</span><span>{proposal.risk.filter(c => c.status === 'pass').length}/{proposal.risk.length} passed</span></div><div className="checks-list">{proposal.risk.map((c, i) => <div className="check-line" key={`${c.name}-${i}`}><span className={`check-symbol ${c.status}`}>{c.status === 'pass' ? <Check size={12}/> : c.status === 'warn' ? <CircleAlert size={12}/> : <X size={12}/>}</span><div><strong>{c.name.replaceAll('_', ' ')}</strong><p>{c.detail}</p></div><span className={`check-result ${c.status}`}>{c.status === 'pass' ? 'PASS' : c.status === 'warn' ? 'WARN' : 'BLOCK'}</span></div>)}</div>
-                <div className={`simulation-card ${proposal.simulation.ok ? 'sim-ok' : 'sim-bad'}`}><div className="simulation-head"><span>{proposal.simulation.ok ? <CircleCheck size={17}/> : <CircleAlert size={17}/>} Trusted RPC simulation</span><strong>{proposal.simulation.ok ? 'PASSED' : 'FAILED'}</strong></div><p>{proposal.simulation.reason}</p>{proposal.simulation.gas_estimate !== undefined && <div className="sim-metrics"><div><span>Gas estimate</span><strong>{proposal.simulation.gas_estimate.toLocaleString()}</strong></div><div><span>Max gas cap</span><strong>{proposal.simulation.max_gas_limit?.toLocaleString()}</strong></div><div><span>Max fee</span><strong>{formatEth(proposal.simulation.max_fee_wei)} ETH</strong></div></div>}</div>
-                {proposal.receipt && <div className="receipt-card"><div className="simulation-head"><span><BadgeCheck size={17}/> On-chain receipt</span><strong>{proposal.receipt.status.toUpperCase()}</strong></div><div className="detail-row"><span>Transaction hash</span><div className="detail-address mono">{shortAddress(proposal.receipt.transaction_hash)} <button onClick={() => copy(proposal.receipt!.transaction_hash)}><Copy size={13}/></button></div></div><div className="detail-row"><span>Block</span><strong>{proposal.receipt.block_number.toLocaleString()}</strong></div><a href={`https://sepolia.etherscan.io/tx/${proposal.receipt.transaction_hash}`} target="_blank" rel="noreferrer" className="explorer-link">Open on Sepolia Etherscan <ExternalLink size={14}/></a></div>}
-                {proposal.status === 'confirmed' && <div className="success-note"><CircleCheck size={16}/> Receipt verified and audit event written.</div>}
-                <button className="button button-primary full-button approve-button" onClick={approveAndSend} disabled={!connected || !isEligible || busy || ['prepared','submitted','confirmed','failed'].includes(proposal.status)}>{busy ? <LoaderCircle className="spin" size={17}/> : <Fingerprint size={17}/>} {busy ? (busyLabel || 'Processing…') : proposal.status === 'confirmed' ? 'Transaction confirmed' : proposal.status === 'submitted' ? 'Transaction submitted' : 'Review & approve in MetaMask'} <ArrowUpRight size={16}/></button>
-                <p className="approval-foot"><LockKeyhole size={13}/> Requires a fresh server check and one-time intent. Review network, recipient, amount and fee in MetaMask.</p>
-              </div>}
-            </section></div>
-        </>}
+      <main style={{ flex: 1, marginLeft: '96px', padding: '32px', maxWidth: '1400px' }}>
+        {/* Top Header */}
+        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
+          <div style={{ position: 'relative', width: '380px' }}>
+            <Search size={18} style={{ position: 'absolute', left: '16px', top: '14px', color: '#9ca3af' }} />
+            <input 
+              type="text" 
+              placeholder="Search..." 
+              style={{ width: '100%', background: '#121212', border: '1px solid #222', borderRadius: '9999px', padding: '12px 16px 12px 48px', color: '#fff', outline: 'none' }} 
+            />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <button style={{ width: '48px', height: '48px', background: '#fff', color: '#000', borderRadius: '50%', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+              <User size={20} />
+            </button>
+            <button style={{ width: '48px', height: '48px', background: '#fff', color: '#000', borderRadius: '50%', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+              <Wallet size={20} />
+            </button>
+            {!connected && (
+              <button onClick={connectWallet} disabled={busy} style={{ background: '#059669', color: '#fff', border: 'none', padding: '12px 24px', borderRadius: '16px', fontWeight: 'bold', cursor: 'pointer' }}>
+                {busy ? 'Connecting...' : 'Connect Wallet'}
+              </button>
+            )}
+          </div>
+        </header>
 
-        {page === 'controls' && <>
-          <div className="page-heading"><div><div className="eyebrow"><span className="eyebrow-line"/> POLICY CONFIGURATION</div><h1>Risk controls</h1><p>Limits are loaded from backend environment settings, not editable client-side values.</p></div><span className="badge badge-neutral"><LockKeyhole size={13}/> Server enforced</span></div>
-          <div className="controls-grid"><section className="panel controls-summary"><div className="panel-heading"><div><div className="panel-kicker">ACTIVE POLICY</div><h2>Transaction guardrails</h2><p>Policy changes require a backend environment update and application restart.</p></div><div className="policy-icon"><ShieldCheck size={23}/></div></div>
-              <div className="policy-rows"><PolicyRow title="Network allowlist" value="Sepolia only" meta="Chain ID 11155111" status="On"/><PolicyRow title="Per-transaction limit" value={`${policy?.max_transaction_eth ?? '—'} ETH`} meta="Transfer value, excluding fees" status="On"/><PolicyRow title="Rolling daily spend" value={`${policy?.daily_limit_eth ?? '—'} ETH`} meta="Prepared reservations and confirmed transfers count" status="On"/><PolicyRow title="Maximum network fee" value={`${policy?.max_fee_eth ?? '—'} ETH`} meta={`Gas cap: ${policy?.max_gas_limit?.toLocaleString() ?? '—'}`} status="On"/><PolicyRow title="Recipient allowlist" value={policy?.allow_any_recipient ? 'Disabled by override' : `${policy?.allowlist_count ?? 0} configured`} meta={policy?.allow_any_recipient ? 'Unsafe demo setting is enabled' : 'Only configured recipients can be approved'} status={policy?.allow_any_recipient ? 'Review' : policy?.allowlist_count ? 'On' : 'Needs setup'}/><PolicyRow title="Duplicate intent protection" value="One-time & expiring" meta="Each proposal binds to one approval intent and transaction hash" status="On"/><PolicyRow title="LLM authority" value="Explanation only" meta="AI output cannot change transaction fields or override checks" status="On"/></div>
-            </section>
-            <section className="panel configuration-panel"><div className="panel-kicker">SERVER CONFIGURATION</div><h2>Configure the guardrails</h2><p className="body-copy">Set these values in <code>backend/.env</code>. Never put API keys or privileged secrets in the frontend.</p><div className="env-snippet"><div className="env-header"><span>backend/.env</span><button onClick={() => copy('SEPOLIA_RPC_URL=https://your-sepolia-rpc\nALLOWED_RECIPIENTS=0xYourAllowedAddress\nALLOW_ANY_RECIPIENT=false\nMAX_TX_ETH=0.02\nDAILY_LIMIT_ETH=0.05\nMAX_FEE_ETH=0.001\nMAX_GAS_LIMIT=50000\nANTHROPIC_API_KEY=your-key\nANTHROPIC_MODEL=claude-sonnet-5-5')}><Copy size={13}/> Copy template</button></div><pre>{`SEPOLIA_RPC_URL=https://your-sepolia-rpc
-ALLOWED_RECIPIENTS=0xYourAllowedAddress
-ALLOW_ANY_RECIPIENT=false
-MAX_TX_ETH=0.02
-DAILY_LIMIT_ETH=0.05
-MAX_FEE_ETH=0.001
-MAX_GAS_LIMIT=50000
-ANTHROPIC_API_KEY=your-key
-ANTHROPIC_MODEL=claude-sonnet-5-5`}</pre></div><div className="warning-box"><ShieldAlert size={17}/><div><strong>Fail-closed execution</strong><p>If trusted RPC simulation is unavailable, the server blocks preparation. An empty recipient allowlist blocks all transfers unless you explicitly turn on the unsafe override.</p></div></div><div className="warning-box muted-warning"><KeyRound size={17}/><div><strong>No server-side signing</strong><p>This prototype never stores private keys. Wallet ownership is proven with a session signature; the actual transaction must be signed in MetaMask.</p></div></div><button className="button button-secondary full-button" onClick={() => refreshPolicy().catch(e => setError(errorMessage(e)))}><RefreshCw size={15}/> Reload active policy</button></section></div>
-        </>}
+        <div>
+          {error && <div style={{ background: 'rgba(239, 68, 68, 0.2)', border: '1px solid #ef4444', padding: '16px', borderRadius: '16px', marginBottom: '20px', color: '#fca5a5' }}>{error}</div>}
+          {notice && <div style={{ background: 'rgba(16, 185, 129, 0.2)', border: '1px solid #10b981', padding: '16px', borderRadius: '16px', marginBottom: '20px', color: '#6ee7b7' }}>{notice}</div>}
+          
+          {/* ================= OVERVIEW PAGE ================= */}
+          {page === 'overview' && (
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '24px' }}>
+              <div style={{ 
+                background: 'linear-gradient(135deg, #022c22 0%, #09090b 100%)', 
+                border: '1px solid rgba(16, 185, 129, 0.3)', 
+                borderRadius: '32px', 
+                padding: '48px', 
+                position: 'relative', 
+                overflow: 'hidden',
+                minHeight: '420px',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between'
+              }}>
+                <div>
+                  <h1 style={{ fontSize: '48px', fontWeight: 900, lineHeight: 1.1, margin: 0 }}>
+                    Smart <span style={{ color: '#10b981' }}>Finance</span><br />
+                    For Modern User
+                  </h1>
+                </div>
 
-        {page === 'audit' && <>
-          <div className="page-heading"><div><div className="eyebrow"><span className="eyebrow-line"/> FORENSIC ACTIVITY</div><h1>Audit log</h1><p>Server-generated records for proposals, blocked checks, approval intents and receipts.</p></div><button className="button button-quiet" onClick={() => refreshAudit().catch(() => {})} disabled={!connected || auditLoading}><RefreshCw size={15} className={auditLoading ? 'spin' : ''}/> Refresh log</button></div>
-          <section className="panel full-audit-panel"><div className="audit-tools"><div className="audit-count"><span className="count-block">{audits.filter(a => a.status === 'block').length} blocked</span><span className="count-total">{audits.length} events</span></div><div className="audit-search"><Search size={16}/><input aria-label="Search audit log" value={auditQuery} onChange={e => setAuditQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') refreshAudit(auditQuery).catch(() => {}) }} placeholder="Search actions, hashes, proposal IDs…"/><button onClick={() => refreshAudit(auditQuery).catch(() => {})} disabled={!connected}>Search</button></div></div>
-            {!connected ? <EmptyState icon={<Wallet size={20}/>} title="Connect your wallet" text="Sign in with MetaMask to load its private audit view." action="Connect wallet" onAction={connectWallet}/> : audits.length === 0 ? <EmptyState icon={<Search size={20}/>} title="No matching events" text="Try a different query or create your first proposal."/> : <AuditTable items={audits} onCopy={copy}/>}</section>
-          <div className="audit-disclaimer"><LockKeyhole size={15}/> Audit events are stored in the backend SQLite database. They are not blockchain events unless explicitly linked to a verified on-chain transaction receipt.</div>
-        </>}
-        <footer className="app-footer"><span>AGENT VAULT <span className="footer-sep">/</span> TESTNET PROTOTYPE</span><span><span className="pulse-dot green"/> Mainnet execution disabled</span></footer>
-      </div>
-    </main>
-  </div>
-}
+                <div style={{
+                  position: 'absolute', right: '32px', bottom: '32px',
+                  width: '300px', height: '180px',
+                  background: 'linear-gradient(135deg, #1f2937 0%, #111827 100%)',
+                  borderRadius: '20px', border: '1px solid #374151',
+                  padding: '20px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
+                  transform: 'rotate(2deg)'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' }}>
+                    <div style={{ width: '40px', height: '30px', background: '#fde047', borderRadius: '6px', opacity: 0.8 }}></div>
+                    <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#9ca3af', fontStyle: 'italic' }}>mastercard.</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+                    <div>
+                      <div style={{ fontSize: '10px', color: '#9ca3af' }}>Balance</div>
+                      <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{connected ? `${balance} ETH` : '$24,580.00'}</div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '-8px' }}>
+                      <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#ef4444', opacity: 0.8 }}></div>
+                      <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#f59e0b', opacity: 0.8, marginLeft: '-10px' }}></div>
+                    </div>
+                  </div>
+                </div>
 
-function HealthRow({ icon, title, description, status, label }: { icon: ReactNode; title: string; description: string; status: 'pass' | 'block' | 'warn'; label: string }) {
-  return <div className="health-row"><div className="health-icon">{icon}</div><div className="health-copy"><strong>{title}</strong><span>{description}</span></div><span className={`health-tag ${status}`}>{status === 'pass' ? <Check size={12}/> : status === 'warn' ? <CircleAlert size={12}/> : <Ban size={12}/>} {label}</span></div>
-}
-function PolicyRow({ title, value, meta, status }: { title: string; value: string; meta: string; status: string }) {
-  const needs = status === 'Needs setup' || status === 'Review'
-  return <div className="policy-row"><div className="policy-status-icon">{needs ? <CircleAlert size={17}/> : <Check size={17}/>}</div><div className="policy-copy"><strong>{title}</strong><span>{meta}</span></div><div className="policy-value"><strong>{value}</strong><span className={needs ? 'amber-text' : 'green-text'}>{status}</span></div></div>
-}
-function EmptyState({ icon, title, text, action, onAction }: { icon: ReactNode; title: string; text: string; action?: string; onAction?: () => void }) {
-  return <div className="empty-state"><div className="empty-icon">{icon}</div><strong>{title}</strong><p>{text}</p>{action && onAction && <button className="button button-secondary button-sm" onClick={onAction}>{action}</button>}</div>
-}
-function AuditTable({ items, onCopy }: { items: Audit[]; onCopy: (text: string) => void }) {
-  return <div className="table-scroll"><table className="audit-table"><thead><tr><th>Event</th><th>Status</th><th>Details</th><th>Timestamp</th><th>Reference</th></tr></thead><tbody>{items.map(item => <tr key={item.id}><td><div className="event-name"><span className={`event-icon ${item.status}`}>{item.status === 'pass' ? <Check size={14}/> : item.status === 'pending' ? <Clock3 size={14}/> : <ShieldAlert size={14}/>}</span><div><strong>{item.action.replaceAll('_',' ')}</strong><small>#{item.id}</small></div></div></td><td><span className={`table-status ${item.status}`}>{item.status}</span></td><td><span className="audit-message">{item.message}</span></td><td><span className="date-cell">{fmtDate(item.created_at)}</span></td><td>{item.tx_hash ? <div className="reference-cell"><a href={`https://sepolia.etherscan.io/tx/${item.tx_hash}`} target="_blank" rel="noreferrer">{shortAddress(item.tx_hash)} <ExternalLink size={12}/></a><button onClick={() => onCopy(item.tx_hash!)} aria-label="Copy transaction hash"><Copy size={12}/></button></div> : item.proposal_id ? <div className="reference-cell mono">{item.proposal_id.slice(0, 8)}…<button onClick={() => onCopy(item.proposal_id!)} aria-label="Copy proposal ID"><Copy size={12}/></button></div> : <span className="text-muted">—</span>}</td></tr>)}</tbody></table></div>
+                <div>
+                  <button onClick={() => setPage('agent')} style={{ background: '#059669', color: '#fff', border: 'none', padding: '14px 28px', borderRadius: '16px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Sparkles size={18} /> Launch Agent Vault <ArrowUpRight size={18} />
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ 
+                background: 'linear-gradient(180deg, rgba(6, 78, 59, 0.4) 0%, #09090b 100%)', 
+                border: '1px solid rgba(16, 185, 129, 0.3)', 
+                borderRadius: '32px', 
+                padding: '32px',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between'
+              }}>
+                <div>
+                  <h2 style={{ fontSize: '28px', fontWeight: 'bold', marginBottom: '12px', color: '#34d399' }}>Sepolia Wallet Balance</h2>
+                  <p style={{ fontSize: '13px', color: '#9ca3af', lineHeight: 1.6 }}>
+                    Sepolia is an Ethereum testnet for testing smart contracts and blockchain apps using test ETH, without risking real funds[cite: 20].
+                  </p>
+                </div>
+
+                <div style={{ margin: '20px 0', background: '#121212', padding: '20px', borderRadius: '20px', border: '1px solid #222' }}>
+                  <div style={{ fontSize: '12px', color: '#9ca3af' }}>Connected Balance</div>
+                  <div style={{ fontSize: '32px', fontWeight: 900, color: '#10b981', marginTop: '4px' }}>{balance} <span style={{ fontSize: '16px', color: '#fff' }}>ETH</span></div>
+                </div>
+
+                <button onClick={() => refreshBalance()} style={{ width: '100%', background: '#27272a', color: '#fff', border: 'none', padding: '14px', borderRadius: '16px', fontWeight: 'bold', cursor: 'pointer' }}>
+                  Sync Wallet Balance
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ================= AI AGENT PAGE ================= */}
+          {page === 'agent' && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+              <div style={{ 
+                background: 'linear-gradient(135deg, #064e3b 0%, #09090b 100%)', 
+                border: '1px solid rgba(16, 185, 129, 0.4)', 
+                borderRadius: '32px', 
+                padding: '40px',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                minHeight: '480px',
+                position: 'relative',
+                overflow: 'hidden'
+              }}>
+                <div>
+                  <span style={{ background: 'rgba(255,255,255,0.1)', color: '#34d399', fontSize: '12px', fontWeight: 'bold', padding: '6px 14px', borderRadius: '9999px', textTransform: 'uppercase' }}>Autonomous Security</span>
+                  <h2 style={{ fontSize: '40px', fontWeight: 900, color: '#fff', marginTop: '20px', lineHeight: 1.2 }}>
+                    Ai Transaction <span style={{ color: '#34d399' }}>Agent</span>
+                  </h2>
+                  <p style={{ color: '#d1d5db', fontSize: '14px', marginTop: '12px', lineHeight: 1.6 }}>
+                    Describe your transfer goal. Our intelligent agent compiles smart execution plans while deterministic rules guard your assets.
+                  </p>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', color: '#34d399', fontSize: '14px', fontWeight: 'bold' }}>
+                  <Sparkles size={20} /> Claude & Local Fallback Engine Active
+                </div>
+              </div>
+
+              <div style={{ background: '#121212', border: '1px solid #222', padding: '32px', borderRadius: '32px' }}>
+                <h3 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '16px', color: '#fff' }}>Build a Transaction</h3>
+                <form onSubmit={createProposal} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#9ca3af', marginBottom: '6px' }}>Goal / Instruction</label>
+                    <textarea value={goal} onChange={e => setGoal(e.target.value)} rows={2} style={{ width: '100%', background: '#000', border: '1px solid #333', borderRadius: '14px', padding: '14px', color: '#fff', outline: 'none' }} required />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#9ca3af', marginBottom: '6px' }}>Recipient Address</label>
+                    <input type="text" value={recipient} onChange={e => setRecipient(e.target.value)} placeholder="0x..." style={{ width: '100%', background: '#000', border: '1px solid #333', borderRadius: '14px', padding: '14px', color: '#fff', outline: 'none' }} required />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#9ca3af', marginBottom: '6px' }}>Amount (ETH)</label>
+                    <input type="number" step="0.0001" value={amount} onChange={e => setAmount(e.target.value)} style={{ width: '100%', background: '#000', border: '1px solid #333', borderRadius: '14px', padding: '14px', color: '#fff', outline: 'none' }} required />
+                  </div>
+                  <button type="submit" disabled={!connected || busy} style={{ background: '#059669', color: '#fff', border: 'none', padding: '14px', borderRadius: '14px', fontWeight: 'bold', cursor: 'pointer', marginTop: '8px' }}>
+                    {busy ? (busyLabel || 'Processing...') : 'Generate & Check Proposal'}
+                  </button>
+                </form>
+
+                {proposal && (
+                  <div style={{ marginTop: '20px', padding: '16px', background: '#000', borderRadius: '16px', border: '1px solid #333' }}>
+                    <div style={{ color: '#10b981', fontWeight: 'bold', marginBottom: '6px' }}>Proposal Generated</div>
+                    <p style={{ fontSize: '12px', marginBottom: '12px', color: '#d1d5db' }}>{proposal.explanation}</p>
+                    <button onClick={approveAndSend} disabled={!isEligible || busy} style={{ width: '100%', background: '#2563eb', color: '#fff', border: 'none', padding: '12px', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' }}>
+                      Approve & Sign in MetaMask
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ================= RISK CONTROLS PAGE ================= */}
+          {page === 'controls' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+                <div style={{ 
+                  background: 'linear-gradient(135deg, #064e3b 0%, #111827 100%)', 
+                  border: '1px solid rgba(16, 185, 129, 0.4)', 
+                  borderRadius: '32px', 
+                  padding: '36px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between'
+                }}>
+                  <div>
+                    <span style={{ fontSize: '12px', color: '#34d399', fontWeight: 'bold', textTransform: 'uppercase' }}>Security Guardrails</span>
+                    <h2 style={{ fontSize: '32px', fontWeight: 900, color: '#fff', marginTop: '8px' }}>Risk Controls</h2>
+                    <p style={{ fontSize: '13px', color: '#9ca3af', marginTop: '8px' }}>Locked against malicious contracts and unauthorized spending.</p>
+                  </div>
+                  <div style={{ width: '64px', height: '64px', background: 'rgba(16, 185, 129, 0.2)', borderRadius: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#34d399' }}>
+                    <LockKeyhole size={32} />
+                  </div>
+                </div>
+
+                <div style={{ 
+                  background: 'linear-gradient(135deg, #022c22 0%, #111827 100%)', 
+                  border: '1px solid rgba(16, 185, 129, 0.4)', 
+                  borderRadius: '32px', 
+                  padding: '36px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between'
+                }}>
+                  <div>
+                    <span style={{ fontSize: '12px', color: '#34d399', fontWeight: 'bold', textTransform: 'uppercase' }}>Rolling 24 Hours</span>
+                    <h2 style={{ fontSize: '32px', fontWeight: 900, color: '#fff', marginTop: '8px' }}>Daily Spending Limit</h2>
+                    <p style={{ fontSize: '13px', color: '#9ca3af', marginTop: '8px' }}>Strict automated outflow limits per rolling day.</p>
+                  </div>
+                  <div style={{ width: '64px', height: '64px', background: 'rgba(16, 185, 129, 0.2)', borderRadius: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#34d399' }}>
+                    <Clock3 size={32} />
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ background: '#121212', border: '1px solid #222', padding: '32px', borderRadius: '32px' }}>
+                <h3 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '16px', color: '#fff' }}>Active Backend Policy Settings</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <div style={{ background: '#000', padding: '20px', borderRadius: '16px', border: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div><strong>Max Transaction Limit</strong><div style={{ fontSize: '12px', color: '#9ca3af' }}>Per transaction ceiling enforced by server</div></div>
+                    <span style={{ color: '#10b981', fontWeight: 'bold', fontSize: '16px' }}>{policy?.max_transaction_eth ?? '—'} ETH</span>
+                  </div>
+                  <div style={{ background: '#000', padding: '20px', borderRadius: '16px', border: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div><strong>Daily Spending Limit</strong><div style={{ fontSize: '12px', color: '#9ca3af' }}>Rolling 24-hour protection</div></div>
+                    <span style={{ color: '#10b981', fontWeight: 'bold', fontSize: '16px' }}>{policy?.daily_limit_eth ?? '—'} ETH</span>
+                  </div>
+                  <div style={{ background: '#000', padding: '20px', borderRadius: '16px', border: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div><strong>Network Restriction</strong><div style={{ fontSize: '12px', color: '#9ca3af' }}>Ethereum Sepolia Testnet Only</div></div>
+                    <span style={{ color: '#34d399', fontWeight: 'bold', fontSize: '14px' }}>Chain ID 11155111</span>
+                  </div>
+                </div>
+                <button onClick={() => refreshPolicy().catch(e => setError(errorMessage(e)))} style={{ marginTop: '20px', background: '#27272a', color: '#fff', border: 'none', padding: '14px 24px', borderRadius: '14px', fontWeight: 'bold', cursor: 'pointer' }}>
+                  Reload Active Policy
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ================= AUDIT LOG PAGE (Upgraded with Emerald Green Vibe) ================= */}
+          {page === 'audit' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              <div style={{ 
+                background: 'linear-gradient(135deg, #064e3b 0%, #09090b 100%)', 
+                border: '1px solid rgba(16, 185, 129, 0.4)', 
+                borderRadius: '32px', 
+                padding: '36px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}>
+                <div>
+                  <span style={{ fontSize: '12px', color: '#34d399', fontWeight: 'bold', textTransform: 'uppercase' }}>Security Trail</span>
+                  <h2 style={{ fontSize: '32px', fontWeight: 900, color: '#fff', marginTop: '8px' }}>Forensic Audit Log</h2>
+                  <p style={{ fontSize: '13px', color: '#9ca3af', marginTop: '8px' }}>Server-generated records for proposals, blocked checks, and transaction receipts.</p>
+                </div>
+                <button onClick={() => refreshAudit()} style={{ background: '#059669', color: '#fff', border: 'none', padding: '12px 20px', borderRadius: '14px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 12px rgba(5, 150, 105, 0.3)' }}>
+                  <RefreshCw size={16}/> Refresh Log
+                </button>
+              </div>
+
+              <div style={{ background: '#121212', border: '1px solid rgba(16, 185, 129, 0.2)', padding: '32px', borderRadius: '32px' }}>
+                {audits.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '48px 0', color: '#9ca3af' }}>No audit records found. Connect wallet to load activity trail.</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {audits.map(item => (
+                      <div key={item.id} style={{ background: '#000', padding: '18px 20px', borderRadius: '16px', border: '1px solid #222', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                          <div style={{ width: '38px', height: '38px', borderRadius: '12px', background: item.status === 'pass' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: item.status === 'pass' ? '#34d399' : '#f87171' }}>
+                            {item.status === 'pass' ? <ShieldCheck size={18}/> : <ShieldAlert size={18}/>}
+                          </div>
+                          <div>
+                            <strong style={{ fontSize: '14px', color: '#fff', textTransform: 'capitalize' }}>{item.action.replaceAll('_', ' ')}</strong>
+                            <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '2px' }}>{item.message}</div>
+                          </div>
+                        </div>
+                        <span style={{ fontSize: '12px', padding: '6px 14px', borderRadius: '9999px', background: item.status === 'pass' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)', color: item.status === 'pass' ? '#34d399' : '#f87171', fontWeight: 'bold' }}>
+                          {item.status.toUpperCase()}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </main>
+    </div>
+  )
 }
