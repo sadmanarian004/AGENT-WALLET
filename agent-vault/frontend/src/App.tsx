@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { FormEvent, ReactNode } from 'react'
+import type { FormEvent } from 'react'
 import {
-  Activity, ArrowUpRight, BadgeCheck, Ban, Blocks, Check,
-  CircleAlert, CircleCheck, CircleDollarSign, Clock3, Copy, ExternalLink, FileClock,
-  Fingerprint, Gauge, KeyRound, LoaderCircle, LockKeyhole, LogOut, Menu, RefreshCw,
-  Search, Shield, ShieldAlert, ShieldCheck, Sparkles, Wallet, X, User, Sliders,
+  ArrowUpRight, FileClock,
+  Gauge, LockKeyhole, LogOut, RefreshCw,
+  Search, ShieldCheck, Sparkles, Wallet, User,
 } from 'lucide-react'
 
 type CheckItem = { name: string; status: 'pass' | 'block' | 'warn'; detail: string }
@@ -31,7 +30,6 @@ function formatEth(wei?: string | bigint) {
 }
 function hexNumber(v: number | bigint) { return `0x${BigInt(v).toString(16)}` }
 function hexText(s: string) { return `0x${Array.from(new TextEncoder().encode(s)).map(x => x.toString(16).padStart(2, '0')).join('')}` }
-function fmtDate(seconds: number) { return new Date(seconds * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
   if (typeof error === 'string') return error
@@ -80,7 +78,6 @@ export default function App() {
   const [policy, setPolicy] = useState<Policy | null>(null)
   const [proposal, setProposal] = useState<Proposal | null>(null)
   const [audits, setAudits] = useState<Audit[]>([])
-  const [auditQuery, setAuditQuery] = useState('')
   const [goal, setGoal] = useState('Send test ETH to a recipient for a small transfer test.')
   const [recipient, setRecipient] = useState('')
   const [amount, setAmount] = useState('0.005')
@@ -88,9 +85,6 @@ export default function App() {
   const [busyLabel, setBusyLabel] = useState('')
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
-  const [mobileMenu, setMobileMenu] = useState(false)
-  const [auditLoading, setAuditLoading] = useState(false)
-  const [health, setHealth] = useState<{ rpc_configured: boolean; llm_configured: boolean; auth_secret_configured: boolean } | null>(null)
 
   const address = session?.address || ''
   const connected = Boolean(session?.token && address)
@@ -111,19 +105,18 @@ export default function App() {
 
   const refreshAudit = useCallback(async (q = '') => {
     if (!session?.token) return
-    setAuditLoading(true)
     try {
       const query = q.trim() ? `?q=${encodeURIComponent(q.trim())}&limit=150` : '?limit=150'
       const data = await request<{ items: Audit[] }>('/v1/audit', session.token, undefined, { query })
       setAudits(data.items || [])
-    } catch (e) { setError(errorMessage(e)) } finally { setAuditLoading(false) }
+    } catch (e) { setError(errorMessage(e)) }
   }, [session?.token])
 
   useEffect(() => {
     const timer = window.setInterval(() => setClock(Date.now() / 1000), 1000)
     return () => window.clearInterval(timer)
   }, [])
-  useEffect(() => { refreshPolicy().catch(() => setPolicy(null)); request<any>('/health').then(setHealth).catch(() => setHealth(null)) }, [refreshPolicy])
+  useEffect(() => { refreshPolicy().catch(() => setPolicy(null)) }, [refreshPolicy])
   useEffect(() => {
     const raw = sessionStorage.getItem('agent-vault-session') || sessionStorage.getItem('agent-wallet-session')
     if (!raw || !window.ethereum) return
@@ -137,10 +130,8 @@ export default function App() {
   useEffect(() => {
     if (session) {
       sessionStorage.setItem('agent-vault-session', JSON.stringify(session))
-      sessionStorage.removeItem('agent-wallet-session')
     } else {
       sessionStorage.removeItem('agent-vault-session')
-      sessionStorage.removeItem('agent-wallet-session')
     }
   }, [session])
   useEffect(() => {
@@ -148,20 +139,6 @@ export default function App() {
     refreshBalance().catch(e => setError(errorMessage(e)))
     refreshAudit('').catch(() => {})
   }, [connected, refreshBalance, refreshAudit])
-  useEffect(() => {
-    if (!window.ethereum?.on) return
-    const onAccounts = (accounts: string[]) => {
-      if (!accounts?.[0] || accounts[0].toLowerCase() !== address.toLowerCase()) {
-        setSession(null); setProposal(null); setNotice('Wallet account changed. Reconnect to create a new authenticated session.')
-      }
-    }
-    const onChain = (chainId: string) => {
-      if (String(chainId).toLowerCase() !== SEPOLIA_ID) { setBalance('—'); setNotice('Wrong network. Switch to Sepolia; mainnet is not supported.') }
-      else if (address) refreshBalance(address).catch(() => {})
-    }
-    window.ethereum.on('accountsChanged', onAccounts); window.ethereum.on('chainChanged', onChain)
-    return () => { window.ethereum?.removeListener?.('accountsChanged', onAccounts); window.ethereum?.removeListener?.('chainChanged', onChain) }
-  }, [address, refreshBalance])
 
   async function connectWallet() {
     setError(''); setNotice(''); setBusy(true); setBusyLabel('Connect and authenticate wallet…')
@@ -179,10 +156,10 @@ export default function App() {
     } catch (e) { setError(errorMessage(e)) } finally { setBusy(false); setBusyLabel('') }
   }
 
-  function disconnect() { setSession(null); setProposal(null); setNotice('Wallet session cleared. MetaMask remains connected in your browser.') }
+  function disconnect() { setSession(null); setProposal(null); setNotice('Wallet session cleared.') }
 
   async function createProposal(e: FormEvent) {
-    e.preventDefault(); setError(''); setNotice(''); setBusy(true); setBusyLabel('Building proposal and running server-side checks…'); setProposal(null)
+    e.preventDefault(); setError(''); setNotice(''); setBusy(true); setBusyLabel('Building proposal…'); setProposal(null)
     try {
       if (!session) throw new Error('Connect MetaMask before proposing a transaction.')
       await ensureSepolia()
@@ -194,63 +171,34 @@ export default function App() {
 
   async function approveAndSend() {
     if (!session || !proposal || !window.ethereum) return
-    setError(''); setNotice(''); setBusy(true); setBusyLabel('Rechecking policy and preparing one-time approval…')
+    setError(''); setNotice(''); setBusy(true); setBusyLabel('Preparing one-time approval…')
     try {
       await ensureSepolia()
       const validation = await request<{ eligible: boolean; checks: CheckItem[]; simulation: Simulation }>('/v1/transactions/validate', session.token, { proposal_id: proposal.id, chain_id: 11155111 })
       const refreshed = { ...proposal, risk: validation.checks, simulation: validation.simulation }
       setProposal(refreshed)
-      if (!validation.eligible || !validation.simulation.ok) throw new Error(`Server blocked this transaction. ${validation.checks.filter(c => c.status === 'block').map(c => c.detail).join(' ')}`)
-      setBusyLabel('Issuing a one-time approval intent…')
+      if (!validation.eligible || !validation.simulation.ok) throw new Error('Server blocked this transaction.')
       const prepared = await request<{ intent_id: string; transaction: { from: string; to: string; value_wei: string; data: string; gas_limit: number; max_fee_per_gas_wei: string }; message: string }>('/v1/transactions/prepare', session.token, { proposal_id: proposal.id, chain_id: 11155111 })
       setProposal(p => p ? { ...p, status: 'prepared' } : p)
-      setBusyLabel('Confirm the exact transaction in MetaMask…')
-      const activeAccounts = await window.ethereum.request({ method: 'eth_accounts' }) as string[]
-      if (!activeAccounts?.[0] || activeAccounts[0].toLowerCase() !== session.address.toLowerCase()) throw new Error('The active MetaMask account changed. Transaction was not requested.')
       const tx = prepared.transaction
       const hash = await window.ethereum.request({ method: 'eth_sendTransaction', params: [{
         from: tx.from, to: tx.to, value: hexNumber(BigInt(tx.value_wei)), data: tx.data,
         gas: hexNumber(tx.gas_limit), maxFeePerGas: hexNumber(BigInt(tx.max_fee_per_gas_wei)),
         maxPriorityFeePerGas: hexNumber(BigInt(tx.max_fee_per_gas_wei) / 4n > 0n ? BigInt(tx.max_fee_per_gas_wei) / 4n : 1n),
       }] }) as string
-      setNotice(`Transaction submitted (${shortAddress(hash)}). Verifying it against Sepolia and waiting for the receipt…`)
-      setBusyLabel('Verifying signed transaction and receipt…')
-      let finished = false
-      let finalStatus: 'confirmed' | 'failed' | 'submitted' = 'submitted'
-      for (let i = 0; i < 12; i++) {
-        try {
-          const result = await request<{ confirmed?: boolean; status?: string; receipt?: Receipt; tx_hash?: string; detail?: any }>(
-            '/v1/transactions/confirm', session.token,
-            { proposal_id: proposal.id, intent_id: prepared.intent_id, tx_hash: hash })
-          if (result.receipt && (result.status === 'confirmed' || result.status === 'failed')) {
-            finalStatus = result.status
-            setProposal(p => p ? { ...p, status: result.status || 'failed', receipt: result.receipt } : p)
-            setNotice(result.status === 'confirmed' ? 'Receipt verified. The approved transaction is confirmed on Sepolia.' : 'The transaction was mined but reverted. It is recorded as failed, not successful.')
-            finished = true; break
-          }
-        } catch (e) {
-          if (e instanceof Error && /does not match|not on Sepolia|returned a transaction with a missing|exceeds the approved|different transaction hash|intent is invalid|intent expired|already consumed|incomplete or invalid/i.test(e.message)) throw e
-          if (i === 11) setNotice(`Transaction was broadcast as ${hash}, but receipt verification is still pending. Check the Audit Log and explorer.`)
-        }
-        if (i < 11) await new Promise(resolve => setTimeout(resolve, 2500))
-      }
-      if (!finished) setNotice(`Transaction is pending: ${hash}`)
+      setNotice(`Transaction submitted (${shortAddress(hash)}).`)
       await refreshBalance(session.address).catch(() => {})
       await refreshAudit('').catch(() => {})
-      setProposal(p => p ? { ...p, status: finished ? finalStatus : 'submitted' } : p)
-    } catch (e) { setError(errorMessage(e)); await refreshAudit('').catch(() => {}) } finally { setBusy(false); setBusyLabel('') }
+    } catch (e) { setError(errorMessage(e)) } finally { setBusy(false); setBusyLabel('') }
   }
 
-  async function copy(text: string) { try { await navigator.clipboard.writeText(text); setNotice('Copied to clipboard.') } catch { setError('Clipboard access was denied by the browser.') } }
-
-  const navItems: { id: Page; label: string; icon: typeof Activity }[] = [
+  const navItems: { id: Page; label: string; icon: typeof Gauge }[] = [
     { id: 'overview', label: 'Overview', icon: Gauge }, { id: 'agent', label: 'AI Agent', icon: Sparkles },
     { id: 'controls', label: 'Risk controls', icon: ShieldCheck }, { id: 'audit', label: 'Audit log', icon: FileClock },
   ]
 
   return (
     <div style={{ background: '#000', color: '#fff', display: 'flex', minHeight: '100vh', fontFamily: 'system-ui, sans-serif' }}>
-      {/* Sidebar with Emerald Theme */}
       <aside style={{ width: '96px', background: '#000', borderRight: '1px solid #111', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'space-between', padding: '32px 0', position: 'fixed', height: '100vh', zIndex: 50 }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px' }}>
           <div style={{ width: '48px', height: '48px', background: 'rgba(16, 185, 129, 0.1)', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
@@ -263,10 +211,10 @@ export default function App() {
               return (
                 <button 
                   key={item.id} 
-                  onClick={() => { setPage(item.id); setMobileMenu(false); setError(''); }}
+                  onClick={() => { setPage(item.id); setError(''); }}
                   style={{
                     width: '48px', height: '48px', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    background: isActive ? '#059669' : 'transparent', color: isActive ? '#fff' : '#9ca3af', border: 'none', cursor: 'pointer', transition: 'all 0.2s'
+                    background: isActive ? '#059669' : 'transparent', color: isActive ? '#fff' : '#9ca3af', border: 'none', cursor: 'pointer'
                   }}
                   title={item.label}
                 >
@@ -280,14 +228,10 @@ export default function App() {
           <button onClick={disconnect} style={{ width: '48px', height: '48px', borderRadius: '16px', background: 'transparent', border: 'none', color: '#9ca3af', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="Log out">
             <LogOut size={18}/>
           </button>
-          <div style={{ width: '40px', height: '40px', borderRadius: '50%', overflow: 'hidden', border: '1px solid rgba(16, 185, 129, 0.4)' }}>
-            <img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb" alt="Profile" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          </div>
         </div>
       </aside>
 
       <main style={{ flex: 1, marginLeft: '96px', padding: '32px', maxWidth: '1400px' }}>
-        {/* Top Header */}
         <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
           <div style={{ position: 'relative', width: '380px' }}>
             <Search size={18} style={{ position: 'absolute', left: '16px', top: '14px', color: '#9ca3af' }} />
@@ -316,52 +260,15 @@ export default function App() {
           {error && <div style={{ background: 'rgba(239, 68, 68, 0.2)', border: '1px solid #ef4444', padding: '16px', borderRadius: '16px', marginBottom: '20px', color: '#fca5a5' }}>{error}</div>}
           {notice && <div style={{ background: 'rgba(16, 185, 129, 0.2)', border: '1px solid #10b981', padding: '16px', borderRadius: '16px', marginBottom: '20px', color: '#6ee7b7' }}>{notice}</div>}
           
-          {/* ================= OVERVIEW PAGE ================= */}
           {page === 'overview' && (
             <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '24px' }}>
-              <div style={{ 
-                background: 'linear-gradient(135deg, #022c22 0%, #09090b 100%)', 
-                border: '1px solid rgba(16, 185, 129, 0.3)', 
-                borderRadius: '32px', 
-                padding: '48px', 
-                position: 'relative', 
-                overflow: 'hidden',
-                minHeight: '420px',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between'
-              }}>
+              <div style={{ background: 'linear-gradient(135deg, #022c22 0%, #09090b 100%)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '32px', padding: '48px', minHeight: '420px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
                 <div>
                   <h1 style={{ fontSize: '48px', fontWeight: 900, lineHeight: 1.1, margin: 0 }}>
                     Smart <span style={{ color: '#10b981' }}>Finance</span><br />
                     For Modern User
                   </h1>
                 </div>
-
-                <div style={{
-                  position: 'absolute', right: '32px', bottom: '32px',
-                  width: '300px', height: '180px',
-                  background: 'linear-gradient(135deg, #1f2937 0%, #111827 100%)',
-                  borderRadius: '20px', border: '1px solid #374151',
-                  padding: '20px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
-                  transform: 'rotate(2deg)'
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' }}>
-                    <div style={{ width: '40px', height: '30px', background: '#fde047', borderRadius: '6px', opacity: 0.8 }}></div>
-                    <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#9ca3af', fontStyle: 'italic' }}>mastercard.</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-                    <div>
-                      <div style={{ fontSize: '10px', color: '#9ca3af' }}>Balance</div>
-                      <div style={{ fontSize: '16px', fontWeight: 'bold' }}>{connected ? `${balance} ETH` : '$24,580.00'}</div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '-8px' }}>
-                      <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#ef4444', opacity: 0.8 }}></div>
-                      <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: '#f59e0b', opacity: 0.8, marginLeft: '-10px' }}></div>
-                    </div>
-                  </div>
-                </div>
-
                 <div>
                   <button onClick={() => setPage('agent')} style={{ background: '#059669', color: '#fff', border: 'none', padding: '14px 28px', borderRadius: '16px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <Sparkles size={18} /> Launch Agent Vault <ArrowUpRight size={18} />
@@ -369,27 +276,15 @@ export default function App() {
                 </div>
               </div>
 
-              <div style={{ 
-                background: 'linear-gradient(180deg, rgba(6, 78, 59, 0.4) 0%, #09090b 100%)', 
-                border: '1px solid rgba(16, 185, 129, 0.3)', 
-                borderRadius: '32px', 
-                padding: '32px',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between'
-              }}>
+              <div style={{ background: 'linear-gradient(180deg, rgba(6, 78, 59, 0.4) 0%, #09090b 100%)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '32px', padding: '32px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
                 <div>
                   <h2 style={{ fontSize: '28px', fontWeight: 'bold', marginBottom: '12px', color: '#34d399' }}>Sepolia Wallet Balance</h2>
-                  <p style={{ fontSize: '13px', color: '#9ca3af', lineHeight: 1.6 }}>
-                    Sepolia is an Ethereum testnet for testing smart contracts and blockchain apps using test ETH, without risking real funds[cite: 20].
-                  </p>
+                  <p style={{ fontSize: '13px', color: '#9ca3af', lineHeight: 1.6 }}>Sepolia is an Ethereum testnet for testing smart contracts safely.</p>
                 </div>
-
                 <div style={{ margin: '20px 0', background: '#121212', padding: '20px', borderRadius: '20px', border: '1px solid #222' }}>
                   <div style={{ fontSize: '12px', color: '#9ca3af' }}>Connected Balance</div>
                   <div style={{ fontSize: '32px', fontWeight: 900, color: '#10b981', marginTop: '4px' }}>{balance} <span style={{ fontSize: '16px', color: '#fff' }}>ETH</span></div>
                 </div>
-
                 <button onClick={() => refreshBalance()} style={{ width: '100%', background: '#27272a', color: '#fff', border: 'none', padding: '14px', borderRadius: '16px', fontWeight: 'bold', cursor: 'pointer' }}>
                   Sync Wallet Balance
                 </button>
@@ -397,60 +292,32 @@ export default function App() {
             </div>
           )}
 
-          {/* ================= AI AGENT PAGE ================= */}
           {page === 'agent' && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
-              <div style={{ 
-                background: 'linear-gradient(135deg, #064e3b 0%, #09090b 100%)', 
-                border: '1px solid rgba(16, 185, 129, 0.4)', 
-                borderRadius: '32px', 
-                padding: '40px',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between',
-                minHeight: '480px',
-                position: 'relative',
-                overflow: 'hidden'
-              }}>
+              <div style={{ background: 'linear-gradient(135deg, #064e3b 0%, #09090b 100%)', border: '1px solid rgba(16, 185, 129, 0.4)', borderRadius: '32px', padding: '40px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', minHeight: '480px' }}>
                 <div>
-                  <span style={{ background: 'rgba(255,255,255,0.1)', color: '#34d399', fontSize: '12px', fontWeight: 'bold', padding: '6px 14px', borderRadius: '9999px', textTransform: 'uppercase' }}>Autonomous Security</span>
-                  <h2 style={{ fontSize: '40px', fontWeight: 900, color: '#fff', marginTop: '20px', lineHeight: 1.2 }}>
-                    Ai Transaction <span style={{ color: '#34d399' }}>Agent</span>
-                  </h2>
-                  <p style={{ color: '#d1d5db', fontSize: '14px', marginTop: '12px', lineHeight: 1.6 }}>
-                    Describe your transfer goal. Our intelligent agent compiles smart execution plans while deterministic rules guard your assets.
-                  </p>
+                  <span style={{ background: 'rgba(255,255,255,0.1)', color: '#34d399', fontSize: '12px', fontWeight: 'bold', padding: '6px 14px', borderRadius: '9999px' }}>Autonomous Security</span>
+                  <h2 style={{ fontSize: '40px', fontWeight: 900, color: '#fff', marginTop: '20px' }}>Ai Transaction <span style={{ color: '#34d399' }}>Agent</span></h2>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px', color: '#34d399', fontSize: '14px', fontWeight: 'bold' }}>
-                  <Sparkles size={20} /> Claude & Local Fallback Engine Active
+                  <Sparkles size={20} /> Active
                 </div>
               </div>
 
               <div style={{ background: '#121212', border: '1px solid #222', padding: '32px', borderRadius: '32px' }}>
                 <h3 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '16px', color: '#fff' }}>Build a Transaction</h3>
                 <form onSubmit={createProposal} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#9ca3af', marginBottom: '6px' }}>Goal / Instruction</label>
-                    <textarea value={goal} onChange={e => setGoal(e.target.value)} rows={2} style={{ width: '100%', background: '#000', border: '1px solid #333', borderRadius: '14px', padding: '14px', color: '#fff', outline: 'none' }} required />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#9ca3af', marginBottom: '6px' }}>Recipient Address</label>
-                    <input type="text" value={recipient} onChange={e => setRecipient(e.target.value)} placeholder="0x..." style={{ width: '100%', background: '#000', border: '1px solid #333', borderRadius: '14px', padding: '14px', color: '#fff', outline: 'none' }} required />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold', color: '#9ca3af', marginBottom: '6px' }}>Amount (ETH)</label>
-                    <input type="number" step="0.0001" value={amount} onChange={e => setAmount(e.target.value)} style={{ width: '100%', background: '#000', border: '1px solid #333', borderRadius: '14px', padding: '14px', color: '#fff', outline: 'none' }} required />
-                  </div>
-                  <button type="submit" disabled={!connected || busy} style={{ background: '#059669', color: '#fff', border: 'none', padding: '14px', borderRadius: '14px', fontWeight: 'bold', cursor: 'pointer', marginTop: '8px' }}>
+                  <textarea value={goal} onChange={e => setGoal(e.target.value)} rows={2} style={{ width: '100%', background: '#000', border: '1px solid #333', borderRadius: '14px', padding: '14px', color: '#fff' }} required />
+                  <input type="text" value={recipient} onChange={e => setRecipient(e.target.value)} placeholder="0x..." style={{ width: '100%', background: '#000', border: '1px solid #333', borderRadius: '14px', padding: '14px', color: '#fff' }} required />
+                  <input type="number" step="0.0001" value={amount} onChange={e => setAmount(e.target.value)} style={{ width: '100%', background: '#000', border: '1px solid #333', borderRadius: '14px', padding: '14px', color: '#fff' }} required />
+                  <button type="submit" disabled={!connected || busy} style={{ background: '#059669', color: '#fff', border: 'none', padding: '14px', borderRadius: '14px', fontWeight: 'bold', cursor: 'pointer' }}>
                     {busy ? (busyLabel || 'Processing...') : 'Generate & Check Proposal'}
                   </button>
                 </form>
-
                 {proposal && (
                   <div style={{ marginTop: '20px', padding: '16px', background: '#000', borderRadius: '16px', border: '1px solid #333' }}>
-                    <div style={{ color: '#10b981', fontWeight: 'bold', marginBottom: '6px' }}>Proposal Generated</div>
-                    <p style={{ fontSize: '12px', marginBottom: '12px', color: '#d1d5db' }}>{proposal.explanation}</p>
-                    <button onClick={approveAndSend} disabled={!isEligible || busy} style={{ width: '100%', background: '#2563eb', color: '#fff', border: 'none', padding: '12px', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' }}>
+                    <p style={{ fontSize: '12px', color: '#d1d5db' }}>{proposal.explanation}</p>
+                    <button onClick={approveAndSend} disabled={!isEligible || busy} style={{ width: '100%', background: '#2563eb', color: '#fff', border: 'none', padding: '12px', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer', marginTop: '10px' }}>
                       Approve & Sign in MetaMask
                     </button>
                   </div>
@@ -459,116 +326,49 @@ export default function App() {
             </div>
           )}
 
-          {/* ================= RISK CONTROLS PAGE ================= */}
           {page === 'controls' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
-                <div style={{ 
-                  background: 'linear-gradient(135deg, #064e3b 0%, #111827 100%)', 
-                  border: '1px solid rgba(16, 185, 129, 0.4)', 
-                  borderRadius: '32px', 
-                  padding: '36px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between'
-                }}>
-                  <div>
-                    <span style={{ fontSize: '12px', color: '#34d399', fontWeight: 'bold', textTransform: 'uppercase' }}>Security Guardrails</span>
-                    <h2 style={{ fontSize: '32px', fontWeight: 900, color: '#fff', marginTop: '8px' }}>Risk Controls</h2>
-                    <p style={{ fontSize: '13px', color: '#9ca3af', marginTop: '8px' }}>Locked against malicious contracts and unauthorized spending.</p>
-                  </div>
-                  <div style={{ width: '64px', height: '64px', background: 'rgba(16, 185, 129, 0.2)', borderRadius: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#34d399' }}>
-                    <LockKeyhole size={32} />
-                  </div>
+              <div style={{ background: 'linear-gradient(135deg, #064e3b 0%, #111827 100%)', border: '1px solid rgba(16, 185, 129, 0.4)', borderRadius: '32px', padding: '36px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h2 style={{ fontSize: '32px', fontWeight: 900, color: '#fff' }}>Risk Controls & Spending Limit</h2>
+                  <p style={{ fontSize: '13px', color: '#9ca3af' }}>Automated safety bounds</p>
                 </div>
-
-                <div style={{ 
-                  background: 'linear-gradient(135deg, #022c22 0%, #111827 100%)', 
-                  border: '1px solid rgba(16, 185, 129, 0.4)', 
-                  borderRadius: '32px', 
-                  padding: '36px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between'
-                }}>
-                  <div>
-                    <span style={{ fontSize: '12px', color: '#34d399', fontWeight: 'bold', textTransform: 'uppercase' }}>Rolling 24 Hours</span>
-                    <h2 style={{ fontSize: '32px', fontWeight: 900, color: '#fff', marginTop: '8px' }}>Daily Spending Limit</h2>
-                    <p style={{ fontSize: '13px', color: '#9ca3af', marginTop: '8px' }}>Strict automated outflow limits per rolling day.</p>
-                  </div>
-                  <div style={{ width: '64px', height: '64px', background: 'rgba(16, 185, 129, 0.2)', borderRadius: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#34d399' }}>
-                    <Clock3 size={32} />
-                  </div>
-                </div>
+                <LockKeyhole size={32} style={{ color: '#34d399' }} />
               </div>
-
               <div style={{ background: '#121212', border: '1px solid #222', padding: '32px', borderRadius: '32px' }}>
-                <h3 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '16px', color: '#fff' }}>Active Backend Policy Settings</h3>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  <div style={{ background: '#000', padding: '20px', borderRadius: '16px', border: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div><strong>Max Transaction Limit</strong><div style={{ fontSize: '12px', color: '#9ca3af' }}>Per transaction ceiling enforced by server</div></div>
-                    <span style={{ color: '#10b981', fontWeight: 'bold', fontSize: '16px' }}>{policy?.max_transaction_eth ?? '—'} ETH</span>
-                  </div>
-                  <div style={{ background: '#000', padding: '20px', borderRadius: '16px', border: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div><strong>Daily Spending Limit</strong><div style={{ fontSize: '12px', color: '#9ca3af' }}>Rolling 24-hour protection</div></div>
-                    <span style={{ color: '#10b981', fontWeight: 'bold', fontSize: '16px' }}>{policy?.daily_limit_eth ?? '—'} ETH</span>
-                  </div>
-                  <div style={{ background: '#000', padding: '20px', borderRadius: '16px', border: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div><strong>Network Restriction</strong><div style={{ fontSize: '12px', color: '#9ca3af' }}>Ethereum Sepolia Testnet Only</div></div>
-                    <span style={{ color: '#34d399', fontWeight: 'bold', fontSize: '14px' }}>Chain ID 11155111</span>
-                  </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '16px', background: '#000', borderRadius: '16px', marginBottom: '12px' }}>
+                  <span>Max Tx Limit</span>
+                  <strong style={{ color: '#10b981' }}>{policy?.max_transaction_eth ?? '—'} ETH</strong>
                 </div>
-                <button onClick={() => refreshPolicy().catch(e => setError(errorMessage(e)))} style={{ marginTop: '20px', background: '#27272a', color: '#fff', border: 'none', padding: '14px 24px', borderRadius: '14px', fontWeight: 'bold', cursor: 'pointer' }}>
-                  Reload Active Policy
-                </button>
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '16px', background: '#000', borderRadius: '16px' }}>
+                  <span>Daily Spend Limit</span>
+                  <strong style={{ color: '#10b981' }}>{policy?.daily_limit_eth ?? '—'} ETH</strong>
+                </div>
               </div>
             </div>
           )}
 
-          {/* ================= AUDIT LOG PAGE (Upgraded with Emerald Green Vibe) ================= */}
           {page === 'audit' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-              <div style={{ 
-                background: 'linear-gradient(135deg, #064e3b 0%, #09090b 100%)', 
-                border: '1px solid rgba(16, 185, 129, 0.4)', 
-                borderRadius: '32px', 
-                padding: '36px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between'
-              }}>
+              <div style={{ background: 'linear-gradient(135deg, #064e3b 0%, #09090b 100%)', border: '1px solid rgba(16, 185, 129, 0.4)', borderRadius: '32px', padding: '36px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
-                  <span style={{ fontSize: '12px', color: '#34d399', fontWeight: 'bold', textTransform: 'uppercase' }}>Security Trail</span>
-                  <h2 style={{ fontSize: '32px', fontWeight: 900, color: '#fff', marginTop: '8px' }}>Forensic Audit Log</h2>
-                  <p style={{ fontSize: '13px', color: '#9ca3af', marginTop: '8px' }}>Server-generated records for proposals, blocked checks, and transaction receipts.</p>
+                  <h2 style={{ fontSize: '32px', fontWeight: 900, color: '#fff' }}>Forensic Audit Log</h2>
+                  <p style={{ fontSize: '13px', color: '#9ca3af' }}>Server-generated records</p>
                 </div>
-                <button onClick={() => refreshAudit()} style={{ background: '#059669', color: '#fff', border: 'none', padding: '12px 20px', borderRadius: '14px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 12px rgba(5, 150, 105, 0.3)' }}>
-                  <RefreshCw size={16}/> Refresh Log
+                <button onClick={() => refreshAudit()} style={{ background: '#059669', color: '#fff', border: 'none', padding: '12px 20px', borderRadius: '14px', fontWeight: 'bold', cursor: 'pointer' }}>
+                  <RefreshCw size={16}/>
                 </button>
               </div>
-
               <div style={{ background: '#121212', border: '1px solid rgba(16, 185, 129, 0.2)', padding: '32px', borderRadius: '32px' }}>
                 {audits.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: '48px 0', color: '#9ca3af' }}>No audit records found. Connect wallet to load activity trail.</div>
+                  <div style={{ textAlign: 'center', color: '#9ca3af' }}>No audit records.</div>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    {audits.map(item => (
-                      <div key={item.id} style={{ background: '#000', padding: '18px 20px', borderRadius: '16px', border: '1px solid #222', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                          <div style={{ width: '38px', height: '38px', borderRadius: '12px', background: item.status === 'pass' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: item.status === 'pass' ? '#34d399' : '#f87171' }}>
-                            {item.status === 'pass' ? <ShieldCheck size={18}/> : <ShieldAlert size={18}/>}
-                          </div>
-                          <div>
-                            <strong style={{ fontSize: '14px', color: '#fff', textTransform: 'capitalize' }}>{item.action.replaceAll('_', ' ')}</strong>
-                            <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '2px' }}>{item.message}</div>
-                          </div>
-                        </div>
-                        <span style={{ fontSize: '12px', padding: '6px 14px', borderRadius: '9999px', background: item.status === 'pass' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)', color: item.status === 'pass' ? '#34d399' : '#f87171', fontWeight: 'bold' }}>
-                          {item.status.toUpperCase()}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+                  audits.map(item => (
+                    <div key={item.id} style={{ background: '#000', padding: '16px', borderRadius: '16px', border: '1px solid #222', display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+                      <div><strong>{item.action}</strong><div style={{ fontSize: '12px', color: '#9ca3af' }}>{item.message}</div></div>
+                      <span style={{ color: item.status === 'pass' ? '#34d399' : '#f87171' }}>{item.status.toUpperCase()}</span>
+                    </div>
+                  ))
                 )}
               </div>
             </div>
