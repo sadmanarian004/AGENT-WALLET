@@ -62,32 +62,94 @@ The system is not a replacement for wallet-owner review, security audits, or ope
 
 ---
 
+## 🙋 How Users Benefit from Agent Vault
+
+Agent Vault is designed to help users turn a wallet instruction into a reviewable, policy-checked transaction flow—without handing their private keys to the backend.
+
+```mermaid
+flowchart TD
+    A(["User states a goal<br/>e.g. send a permitted amount"]) --> B["Agent interprets the request<br/>as a structured proposal"]
+    B --> C["User can review the proposed details<br/>recipient · amount · network"]
+    C --> D["Backend validates the proposal<br/>and verifies required authentication"]
+    D --> E{"Policy checks pass?"}
+    E -->|No| F["Explain the rejection reason<br/>and record the decision"]
+    F --> G(["User can correct the request<br/>or stop safely"])
+    E -->|Yes| H["Wallet provider presents<br/>the transaction for authorization"]
+    H --> I{"User approves in wallet?"}
+    I -->|No| J(["No user authorization<br/>so the flow stops"])
+    I -->|Yes| K["Permitted transaction is submitted<br/>to Ethereum Sepolia"]
+    K --> L["Check transaction receipt<br/>and record the outcome"]
+    L --> M(["User sees the status,<br/>transaction reference, and audit trail"])
+
+    classDef user fill:#e8f3ff,stroke:#3677b8,color:#102a43
+    classDef safeguard fill:#eaf7ec,stroke:#3b8650,color:#173b22
+    classDef stop fill:#fff0f0,stroke:#b94a48,color:#5a1717
+    classDef result fill:#f3eaff,stroke:#8754b8,color:#321c4d
+    class A,C,G,J,M user
+    class B,D,E,H,I,K safeguard
+    class F stop
+    class L result
+```
+
+### Practical user value
+
+- **More control:** transaction details are represented in a structured proposal before execution.
+- **Policy guardrails:** configured per-transaction limits, cumulative daily limits, recipient restrictions, and balance-plus-gas checks can reject proposals that do not meet policy.
+- **Private-key separation:** signing remains with the user's injected wallet provider; the backend is not designed to take custody of the user's private key.
+- **Clearer failure handling:** rejected proposals can return a reason instead of silently proceeding.
+- **Traceability:** audit events and blockchain transaction references help users and operators inspect what happened.
+- **Explicit authorization:** a policy approval is not the same as wallet approval or blockchain confirmation; those stages remain separate.
+
+This diagram describes the intended user journey. Exact prompts, UI screens, and deployed behavior should be confirmed against the current application. The live environment listed by this README uses Ethereum Sepolia, a test network—not real-value production settlement.
+
+---
+
 ## 🏗️ System Architecture
 
 Agent Vault follows a decoupled, three-tier architecture with explicit trust boundaries.
 
-```text
-┌───────────────────────────────────────────────────────────────┐
-│ CLIENT / PRESENTATION                                         │
-│ React + Vite + injected wallet provider (e.g. MetaMask)       │
-│ Intent capture · Wallet connection · Structured signing      │
-└───────────────────────────────┬───────────────────────────────┘
-                                │ HTTPS API requests
-                                │ EIP-712 typed signatures
-                                ▼
-┌───────────────────────────────────────────────────────────────┐
-│ GATEWAY & POLICY ENGINE                                       │
-│ FastAPI / Python · Pydantic transaction schemas               │
-│ Intent parsing · Authentication · Deterministic risk checks   │
-│ Audit event recording                                         │
-└───────────────────────┬──────────────────────┬────────────────┘
-                        │                      │
-                        ▼                      ▼
-┌──────────────────────────────┐  ┌─────────────────────────────┐
-│ AUDIT DATA LAYER             │  │ EVM EXECUTION LAYER          │
-│ Turso / libSQL               │  │ Ethereum Sepolia             │
-│ Security and decision events │  │ JSON-RPC · Broadcast · Verify│
-└──────────────────────────────┘  └─────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph CLIENT["Client / Presentation — user-controlled trust boundary"]
+        UI["React + Vite UI<br/>Intent capture · Wallet connection"]
+        WALLET["Injected wallet provider<br/>Private key custody · User signing"]
+        UI <--> WALLET
+    end
+
+    subgraph BACKEND["Gateway & Policy Engine"]
+        API["FastAPI / Python API"]
+        SCHEMA["Pydantic v2<br/>Typed transaction proposal"]
+        AUTH["EIP-191 session challenge<br/>Signature verification"]
+        POLICY["Deterministic policy engine<br/>Spending limits · Recipient allowlist<br/>Balance + estimated gas checks"]
+        API --> SCHEMA --> AUTH --> POLICY
+    end
+
+    subgraph DATA["Audit Data Layer"]
+        DB[("Turso / libSQL<br/>Audit and decision events")]
+    end
+
+    subgraph CHAIN["EVM Execution Layer"]
+        RPC["Ethereum Sepolia JSON-RPC"]
+        TX["Transaction broadcast"]
+        RECEIPT["Receipt / status verification"]
+        RPC --> TX --> RECEIPT
+    end
+
+    UI -->|"HTTPS request / proposal"| API
+    WALLET -->|"EIP-712 typed signature<br/>when required by flow"| API
+    POLICY -->|"Record decision"| DB
+    POLICY -->|"Approved proposal only"| RPC
+    RECEIPT -->|"Execution result / tx hash"| API
+    API -->|"Status and audit outcome"| UI
+
+    classDef client fill:#e8f3ff,stroke:#3677b8,color:#102a43
+    classDef backend fill:#eaf7ec,stroke:#3b8650,color:#173b22
+    classDef data fill:#fff4dc,stroke:#b8872b,color:#4d3710
+    classDef chain fill:#f3eaff,stroke:#8754b8,color:#321c4d
+    class UI,WALLET client
+    class API,SCHEMA,AUTH,POLICY backend
+    class DB data
+    class RPC,TX,RECEIPT chain
 ```
 
 ### Tier 1 — Client and cryptographic boundary
