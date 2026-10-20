@@ -1,3 +1,9 @@
+![Status](https://img.shields.io/badge/Status-Live%20%26%20Operational-success?style=for-the-badge)
+![Network](https://img.shields.io/badge/Network-Ethereum%20Sepolia-blue?style=for-the-badge)
+![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
+![Python](https://img.shields.io/badge/Backend-FastAPI-0052CC?style=for-the-badge&logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/Frontend-React%20%2F%20Vite-61DAFB?style=for-the-badge&logo=react&logoColor=black)
+
 # Agent Vault — policy-gated Sepolia demo
 
 A full-stack prototype for **Agent Vault**, an AI-assisted EVM wallet with a responsive dark dashboard and policy-gated execution workflow. The app builds a native ETH transfer proposal, independently enforces backend policies, simulates it on Ethereum Sepolia, asks MetaMask to sign/broadcast the exact transfer, and verifies the resulting transaction and receipt against a configured Sepolia RPC. No private key is sent to or stored by this application.
