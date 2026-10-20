@@ -17,7 +17,7 @@ type Audit = { id: number; created_at: number; action: string; proposal_id?: str
 type Session = { token: string; address: string }
 type Page = 'overview' | 'agent' | 'controls' | 'audit'
 
-const API = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '')
+const API = (import.meta.env.VITE_API_URL || 'https://agent-wallet-6oou.onrender.com').replace(/\/$/, '')
 const SEPOLIA_ID = '0xaa36a7'
 const WEI = 10n ** 18n
 
@@ -31,30 +31,43 @@ function formatEth(wei?: string | bigint) {
 }
 function hexNumber(v: number | bigint) { return `0x${BigInt(v).toString(16)}` }
 function hexText(s: string) { return `0x${Array.from(new TextEncoder().encode(s)).map(x => x.toString(16).padStart(2, '0')).join('')}` }
+
 function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
+  if (error instanceof Error) {
+    if (error.message.includes('Failed to fetch')) {
+      return 'Could not connect to backend server. Render free instance may be waking up, please wait 30 seconds and try again.'
+    }
+    return error.message
+  }
   if (typeof error === 'string') return error
-  return 'Something went wrong. Check the connection and try again.'
+  return 'Something went wrong. Check connection and try again.'
 }
 
 async function request<T>(path: string, token?: string, body?: unknown, options?: { method?: string; query?: string }): Promise<T> {
-  const response = await fetch(`${API}${path}${options?.query || ''}`, {
-    method: options?.method || (body === undefined ? 'GET' : 'POST'),
-    headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
-  const data = await response.json().catch(() => ({}))
-  if (!response.ok && response.status !== 202) {
-    const detail = (data as { detail?: any })?.detail
-    if (typeof detail === 'string') throw new Error(detail)
-    if (detail?.message) throw new Error(`${detail.message}${detail.checks ? ` ${(detail.checks as CheckItem[]).filter(x => x.status === 'block').map(x => x.detail).join(' ')}` : ''}`)
-    throw new Error(`Request failed (${response.status}).`)
+  try {
+    const response = await fetch(`${API}${path}${options?.query || ''}`, {
+      method: options?.method || (body === undefined ? 'GET' : 'POST'),
+      headers: { 
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), 
+        ...(token ? { Authorization: `Bearer ${token}` } : {}) 
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok && response.status !== 202) {
+      const detail = (data as { detail?: any })?.detail
+      if (typeof detail === 'string') throw new Error(detail)
+      if (detail?.message) throw new Error(`${detail.message}${detail.checks ? ` ${(detail.checks as CheckItem[]).filter(x => x.status === 'block').map(x => x.detail).join(' ')}` : ''}`)
+      throw new Error(`Request failed (${response.status}).`)
+    }
+    return { ...(data as object), _httpStatus: response.status } as unknown as T
+  } catch (err) {
+    throw new Error(errorMessage(err))
   }
-  return { ...(data as object), _httpStatus: response.status } as unknown as T
 }
 
 async function ensureSepolia() {
-  if (!window.ethereum) throw new Error('MetaMask was not detected. Install or enable the MetaMask browser extension.')
+  if (!window.ethereum) throw new Error('MetaMask was not detected. Install or enable MetaMask browser extension.')
   let chain = String(await window.ethereum.request({ method: 'eth_chainId' })).toLowerCase()
   if (chain !== SEPOLIA_ID) {
     try {
@@ -69,7 +82,7 @@ async function ensureSepolia() {
     }
     chain = String(await window.ethereum.request({ method: 'eth_chainId' })).toLowerCase()
   }
-  if (chain !== SEPOLIA_ID) throw new Error('Switch MetaMask to Sepolia before continuing. Mainnet is disabled in this app.')
+  if (chain !== SEPOLIA_ID) throw new Error('Switch MetaMask to Sepolia network to continue.')
 }
 
 export default function App() {
@@ -93,16 +106,24 @@ export default function App() {
   const isEligible = useMemo(() => Boolean(proposal && proposal.risk.length && proposal.risk.every(c => c.status === 'pass') && proposal.simulation?.ok && proposal.expires_at > clock), [proposal, clock])
 
   const refreshPolicy = useCallback(async () => {
-    const data = await request<Policy>('/v1/policy')
-    setPolicy(data)
+    try {
+      const data = await request<Policy>('/v1/policy')
+      setPolicy(data)
+    } catch {
+      setPolicy(null)
+    }
   }, [])
 
   const refreshBalance = useCallback(async (addr = address) => {
     if (!window.ethereum || !addr) return
-    const chainId = String(await window.ethereum.request({ method: 'eth_chainId' })).toLowerCase()
-    if (chainId !== SEPOLIA_ID) { setBalance('—'); return }
-    const result = await window.ethereum.request({ method: 'eth_getBalance', params: [addr, 'latest'] })
-    setBalance(formatEth(BigInt(result as string)))
+    try {
+      const chainId = String(await window.ethereum.request({ method: 'eth_chainId' })).toLowerCase()
+      if (chainId !== SEPOLIA_ID) { setBalance('—'); return }
+      const result = await window.ethereum.request({ method: 'eth_getBalance', params: [addr, 'latest'] })
+      setBalance(formatEth(BigInt(result as string)))
+    } catch (e) {
+      setError(errorMessage(e))
+    }
   }, [address])
 
   const refreshAudit = useCallback(async (q = '') => {
@@ -118,7 +139,9 @@ export default function App() {
     const timer = window.setInterval(() => setClock(Date.now() / 1000), 1000)
     return () => window.clearInterval(timer)
   }, [])
-  useEffect(() => { refreshPolicy().catch(() => setPolicy(null)) }, [refreshPolicy])
+
+  useEffect(() => { refreshPolicy().catch(() => {}) }, [refreshPolicy])
+
   useEffect(() => {
     const raw = sessionStorage.getItem('agent-vault-session') || sessionStorage.getItem('agent-wallet-session')
     if (!raw || !window.ethereum) return
@@ -130,6 +153,7 @@ export default function App() {
       }).catch(() => {})
     } catch { sessionStorage.removeItem('agent-vault-session'); sessionStorage.removeItem('agent-wallet-session') }
   }, [])
+
   useEffect(() => {
     if (session) {
       sessionStorage.setItem('agent-vault-session', JSON.stringify(session))
@@ -137,6 +161,7 @@ export default function App() {
       sessionStorage.removeItem('agent-vault-session')
     }
   }, [session])
+
   useEffect(() => {
     if (!connected) { setBalance('—'); setAudits([]); return }
     refreshBalance().catch(e => setError(errorMessage(e)))
@@ -144,18 +169,22 @@ export default function App() {
   }, [connected, refreshBalance, refreshAudit])
 
   async function connectWallet() {
-    setError(''); setNotice(''); setBusy(true); setBusyLabel('Connect and authenticate via JWT…')
+    setError(''); setNotice(''); setBusy(true); setBusyLabel('Authenticating wallet…')
     try {
-      if (!window.ethereum) throw new Error('MetaMask was not detected. Install or enable the MetaMask browser extension.')
+      if (!window.ethereum) throw new Error('MetaMask was not detected. Install or enable MetaMask browser extension.')
       await ensureSepolia()
       const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' }) as string[]
       const addr = accounts?.[0]?.toLowerCase()
-      if (!addr) throw new Error('No account was selected in MetaMask.')
+      if (!addr) throw new Error('No account selected in MetaMask.')
+      
       const challenge = await request<{ challenge_id: string; message: string }>('/v1/auth/challenge', undefined, { address: addr })
       const signature = await window.ethereum.request({ method: 'personal_sign', params: [hexText(challenge.message), addr] }) as string
       const auth = await request<{ access_token: string; wallet: string }>('/v1/auth/verify', undefined, { challenge_id: challenge.challenge_id, address: addr, signature })
-      setSession({ token: auth.access_token, address: auth.wallet }); setNotice('JWT Authentication successful. Secure session established.')
-      await refreshPolicy(); await refreshBalance(addr)
+      
+      setSession({ token: auth.access_token, address: auth.wallet })
+      setNotice('Wallet authenticated successfully.')
+      await refreshPolicy()
+      await refreshBalance(addr)
     } catch (e) { setError(errorMessage(e)) } finally { setBusy(false); setBusyLabel('') }
   }
 
@@ -174,7 +203,7 @@ export default function App() {
 
   async function approveAndSend() {
     if (!session || !proposal || !window.ethereum) return
-    setError(''); setNotice(''); setBusy(true); setBusyLabel('Preparing one-time approval…')
+    setError(''); setNotice(''); setBusy(true); setBusyLabel('Preparing transaction approval…')
     try {
       await ensureSepolia()
       const validation = await request<{ eligible: boolean; checks: CheckItem[]; simulation: Simulation }>('/v1/transactions/validate', session.token, { proposal_id: proposal.id, chain_id: 11155111 })
@@ -217,12 +246,12 @@ export default function App() {
           </div>
           {!connected && (
             <button onClick={connectWallet} disabled={busy} style={{ background: '#059669', color: '#fff', border: 'none', padding: '14px 28px', borderRadius: '20px', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 4px 12px rgba(5,150,105,0.4)' }}>
-              {busy ? (busyLabel || 'Connecting...') : 'Connect & Login (JWT)'}
+              {busy ? (busyLabel || 'Connecting...') : 'Connect & Login'}
             </button>
           )}
           {connected && (
             <div style={{ background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.4)', padding: '12px 20px', borderRadius: '18px', fontSize: '13px', color: '#34d399', fontWeight: 'bold' }}>
-              {shortAddress(address)} (JWT Active)
+              {shortAddress(address)}
             </div>
           )}
         </header>
@@ -329,7 +358,7 @@ export default function App() {
                   <h2 style={{ fontSize: '40px', fontWeight: 900, color: '#fff', marginTop: '20px' }}>Ai Transaction <span style={{ color: '#34d399' }}>Agent</span></h2>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px', color: '#34d399', fontSize: '14px', fontWeight: 'bold' }}>
-                  <Sparkles size={20} /> Active (JWT Protected)
+                  <Sparkles size={20} /> Active
                 </div>
               </div>
 
@@ -339,8 +368,8 @@ export default function App() {
                   <textarea value={goal} onChange={e => setGoal(e.target.value)} rows={2} style={{ width: '100%', background: '#000', border: '1px solid #333', borderRadius: '16px', padding: '16px', color: '#fff', outline: 'none' }} required />
                   <input type="text" value={recipient} onChange={e => setRecipient(e.target.value)} placeholder="0x..." style={{ width: '100%', background: '#000', border: '1px solid #333', borderRadius: '16px', padding: '16px', color: '#fff', outline: 'none' }} required />
                   <input type="number" step="0.0001" value={amount} onChange={e => setAmount(e.target.value)} style={{ width: '100%', background: '#000', border: '1px solid #333', borderRadius: '16px', padding: '16px', color: '#fff', outline: 'none' }} required />
-                  <button type="submit" disabled={!connected || busy} style={{ background: '#059669', color: '#fff', border: 'none', padding: '16px', borderRadius: '16px', fontWeight: 'bold', cursor: 'pointer' }}>
-                    {busy ? (busyLabel || 'Processing...') : 'Generate & Check Proposal'}
+                  <button type="submit" disabled={!connected || busy} style={{ background: connected ? '#059669' : '#333', color: '#fff', border: 'none', padding: '16px', borderRadius: '16px', fontWeight: 'bold', cursor: connected ? 'pointer' : 'not-allowed' }}>
+                    {busy ? (busyLabel || 'Processing...') : (connected ? 'Generate & Check Proposal' : 'Connect Wallet to Propose')}
                   </button>
                 </form>
                 {proposal && (
@@ -382,7 +411,7 @@ export default function App() {
               <div style={{ background: 'linear-gradient(135deg, #064e3b 0%, #09090b 100%)', border: '1px solid rgba(16, 185, 129, 0.4)', borderRadius: '36px', padding: '40px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
                   <h2 style={{ fontSize: '36px', fontWeight: 900, color: '#fff' }}>Forensic Audit Log</h2>
-                  <p style={{ fontSize: '14px', color: '#9ca3af', marginTop: '6px' }}>Server-generated records (JWT Secured)</p>
+                  <p style={{ fontSize: '14px', color: '#9ca3af', marginTop: '6px' }}>Server-generated records</p>
                 </div>
                 <button onClick={() => refreshAudit()} style={{ background: '#059669', color: '#fff', border: 'none', padding: '14px 24px', borderRadius: '16px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <RefreshCw size={16}/> Refresh
