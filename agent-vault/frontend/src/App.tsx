@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
-  ArrowUpRight, FileClock,
+  ArrowUpRight,
   LockKeyhole, RefreshCw,
-  Search, ShieldCheck, Sparkles, Wallet, User,
+  Search, Sparkles, Wallet, User,
 } from 'lucide-react'
 import Sidebar from './components/Sidebar'
 
@@ -233,7 +233,6 @@ export default function App() {
           
           {page === 'overview' && (
             <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '28px' }}>
-              {/* Left Hero Card with Embedded Black Mastercard Graphic */}
               <div style={{ 
                 background: 'linear-gradient(145deg, #022c22 0%, #064e3b 50%, #09090b 100%)', 
                 border: '1px solid rgba(16, 185, 129, 0.35)', 
@@ -254,7 +253,6 @@ export default function App() {
                   </h1>
                 </div>
 
-                {/* Embedded Realistic Black Debit Card Graphic matching screenshot */}
                 <div style={{
                   position: 'absolute',
                   right: '40px',
@@ -305,7 +303,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Right Column: Sepolia Balance Cards */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
                 <div style={{ background: 'linear-gradient(180deg, rgba(6, 78, 59, 0.4) 0%, #09090b 100%)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '36px', padding: '36px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', flex: 1 }}>
                   <div>
